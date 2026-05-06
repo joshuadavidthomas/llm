@@ -1407,6 +1407,38 @@ class _SharedResponses(_Shared):
             input=input_tokens, output=output_tokens, details=details or None
         )
 
+    def _reasoning_event(self, item):
+        """Build a redacted-reasoning StreamEvent that carries the opaque
+        ``id`` and ``encrypted_content`` from a Responses-API reasoning
+        item. Echoing this metadata back on the next request via
+        ``_build_responses_input`` lets the model pick up its prior chain
+        of thought - critical for tool-using reasoning models, since
+        without it the model loses ~3% on SWE-bench (per OpenAI)."""
+        rid = getattr(item, "id", None)
+        enc = getattr(item, "encrypted_content", None)
+        summary = getattr(item, "summary", None)
+        meta: Dict[str, Any] = {}
+        if rid:
+            meta["id"] = rid
+        if enc:
+            meta["encrypted_content"] = enc
+        if summary:
+            # ``summary`` is a list of {type:"summary_text", text:"..."}
+            # objects when reasoning summaries are enabled.
+            try:
+                meta["summary"] = [
+                    s.model_dump() if hasattr(s, "model_dump") else dict(s)
+                    for s in summary
+                ]
+            except Exception:
+                meta["summary"] = list(summary)
+        return StreamEvent(
+            type="reasoning",
+            chunk="",
+            redacted=True,
+            provider_metadata={"openai": meta} if meta else None,
+        )
+
 
 class Responses(_SharedResponses, KeyModel):
     needs_key = "openai"
@@ -1519,8 +1551,6 @@ class Responses(_SharedResponses, KeyModel):
                             chunk=item.name or "",
                             tool_call_id=item.call_id,
                         )
-                    elif item.type == "reasoning":
-                        had_reasoning = True
                 elif etype == "response.output_text.delta":
                     yield StreamEvent(type="text", chunk=event.delta or "")
                 elif etype == "response.function_call_arguments.delta":
@@ -1534,7 +1564,10 @@ class Responses(_SharedResponses, KeyModel):
                     )
                 elif etype == "response.output_item.done":
                     item = event.item
-                    if item.type == "function_call":
+                    if item.type == "reasoning":
+                        had_reasoning = True
+                        yield self._reasoning_event(item)
+                    elif item.type == "function_call":
                         try:
                             args = (
                                 json.loads(item.arguments) if item.arguments else {}
@@ -1569,6 +1602,7 @@ class Responses(_SharedResponses, KeyModel):
             for item in completion.output:
                 if item.type == "reasoning":
                     had_reasoning = True
+                    yield self._reasoning_event(item)
                 elif item.type == "function_call":
                     try:
                         args = json.loads(item.arguments) if item.arguments else {}
@@ -1598,9 +1632,11 @@ class Responses(_SharedResponses, KeyModel):
                             yield StreamEvent(type="text", chunk=content.text)
 
         self._set_usage_responses(response, usage)
-        if had_reasoning or (
-            usage
-            and (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        # Fallback: usage said reasoning happened but the API gave us no
+        # reasoning items to harvest encrypted_content from. Emit the
+        # opaque "reasoning happened" marker for UI / token accounting.
+        if not had_reasoning and usage and (
+            (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
         ):
             yield StreamEvent(type="reasoning", chunk="", redacted=True)
         response._prompt_json = redact_data(
@@ -1720,8 +1756,6 @@ class AsyncResponses(_SharedResponses, AsyncKeyModel):
                             chunk=item.name or "",
                             tool_call_id=item.call_id,
                         )
-                    elif item.type == "reasoning":
-                        had_reasoning = True
                 elif etype == "response.output_text.delta":
                     yield StreamEvent(type="text", chunk=event.delta or "")
                 elif etype == "response.function_call_arguments.delta":
@@ -1735,7 +1769,10 @@ class AsyncResponses(_SharedResponses, AsyncKeyModel):
                     )
                 elif etype == "response.output_item.done":
                     item = event.item
-                    if item.type == "function_call":
+                    if item.type == "reasoning":
+                        had_reasoning = True
+                        yield self._reasoning_event(item)
+                    elif item.type == "function_call":
                         try:
                             args = (
                                 json.loads(item.arguments) if item.arguments else {}
@@ -1770,6 +1807,7 @@ class AsyncResponses(_SharedResponses, AsyncKeyModel):
             for item in completion.output:
                 if item.type == "reasoning":
                     had_reasoning = True
+                    yield self._reasoning_event(item)
                 elif item.type == "function_call":
                     try:
                         args = json.loads(item.arguments) if item.arguments else {}
@@ -1799,9 +1837,8 @@ class AsyncResponses(_SharedResponses, AsyncKeyModel):
                             yield StreamEvent(type="text", chunk=content.text)
 
         self._set_usage_responses(response, usage)
-        if had_reasoning or (
-            usage
-            and (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        if not had_reasoning and usage and (
+            (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
         ):
             yield StreamEvent(type="reasoning", chunk="", redacted=True)
         response._prompt_json = redact_data(

@@ -217,3 +217,56 @@ def test_responses_tool_use_streaming(vcr):
     assert "2869461" in output.replace(",", "")
     first, second = chain._responses
     assert first.tool_calls()[0].arguments == {"a": 1231, "b": 2331}
+
+
+@pytest.mark.vcr
+def test_responses_round_trips_encrypted_reasoning(vcr):
+    """Reasoning items returned by the API in the first turn must be
+    echoed back verbatim on the second turn so the model can pick up
+    its hidden chain of thought after the tool result arrives."""
+    from llm.parts import ReasoningPart
+
+    model = llm.get_model("gpt-5.5")
+
+    def lookup_population(country: str) -> int:
+        "Returns the current population of the specified fictional country."
+        return 123124
+
+    def can_have_dragons(population: int) -> bool:
+        "Returns True if the specified population can have dragons."
+        return population > 10000
+
+    chain = model.chain(
+        "Pick a clever country name, look up its population, then check "
+        "whether it can have dragons. Be brief.",
+        tools=[lookup_population, can_have_dragons],
+        stream=False,
+        options={"reasoning_effort": "high"},
+        key=API_KEY,
+    )
+    chain.text()  # drain the chain
+
+    first = chain._responses[0]
+
+    # The first response must produce at least one ReasoningPart carrying
+    # the opaque encrypted_content + id.
+    reasoning_parts = [
+        p for m in first.messages() for p in m.parts if isinstance(p, ReasoningPart)
+    ]
+    assert reasoning_parts, "first turn should expose at least one ReasoningPart"
+    pm = reasoning_parts[0].provider_metadata or {}
+    assert "openai" in pm
+    assert pm["openai"].get("encrypted_content"), "encrypted_content must be captured"
+    assert pm["openai"].get("id"), "reasoning id must be captured"
+
+    # The second turn's outgoing input must echo back that reasoning
+    # item, otherwise the model loses its chain of thought.
+    second = chain._responses[1]
+    second_input = (second._prompt_json or {}).get("input") or []
+    reasoning_inputs = [it for it in second_input if it.get("type") == "reasoning"]
+    assert reasoning_inputs, "second turn must echo a reasoning input item"
+    assert (
+        reasoning_inputs[0]["encrypted_content"]
+        == pm["openai"]["encrypted_content"]
+    )
+    assert reasoning_inputs[0]["id"] == pm["openai"]["id"]
