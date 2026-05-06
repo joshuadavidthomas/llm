@@ -279,13 +279,14 @@ def register_models(register):
                 supports_tools=True,
             ),
         )
-    # GPT-5.5
+    # GPT-5.5 — routes through the Responses API by default; pass
+    # ``-o chat_completions 1`` to fall back to /v1/chat/completions.
     for model_id in (
         "gpt-5.5",
         "gpt-5.5-2026-04-23",
     ):
         register(
-            Chat(
+            Responses(
                 model_id,
                 vision=True,
                 reasoning=True,
@@ -294,7 +295,7 @@ def register_models(register):
                 supports_schema=True,
                 supports_tools=True,
             ),
-            AsyncChat(
+            AsyncResponses(
                 model_id,
                 vision=True,
                 reasoning=True,
@@ -599,7 +600,11 @@ def enum_values_sentence(enum_class):
 
 
 def build_options_class(
-    *, reasoning=False, verbosity=False, image_detail_original=False
+    *,
+    reasoning=False,
+    verbosity=False,
+    image_detail_original=False,
+    chat_completions=False,
 ):
     fields = {
         "json_object": (
@@ -610,6 +615,19 @@ def build_options_class(
             ),
         )
     }
+    if chat_completions:
+        fields["chat_completions"] = (
+            Optional[bool],
+            Field(
+                description=(
+                    "Force the use of the older /v1/chat/completions endpoint "
+                    "instead of /v1/responses. Most callers should leave this "
+                    "off; set to true to fall back to the Chat Completions code "
+                    "path for compatibility."
+                ),
+                default=None,
+            ),
+        )
     image_detail_enum = (
         ImageDetailWithOriginalEnum if image_detail_original else ImageDetailEnum
     )
@@ -882,6 +900,7 @@ class _Shared:
         kwargs = dict(not_nulls(prompt.options))
         json_object = kwargs.pop("json_object", None)
         kwargs.pop("image_detail", None)
+        kwargs.pop("chat_completions", None)
         if "max_tokens" not in kwargs and self.default_max_tokens is not None:
             kwargs["max_tokens"] = self.default_max_tokens
         if json_object:
@@ -1140,6 +1159,654 @@ class AsyncChat(_Shared, AsyncKeyModel):
         ):
             yield StreamEvent(type="reasoning", chunk="", redacted=True)
         response._prompt_json = redact_data({"messages": messages})
+
+
+def _responses_attachment(attachment, image_detail=None):
+    """Translate an llm Attachment into a Responses-API content part."""
+    url = attachment.url
+    base64_content = ""
+    if not url or attachment.resolve_type().startswith("audio/"):
+        base64_content = attachment.base64_content()
+        url = f"data:{attachment.resolve_type()};base64,{base64_content}"
+    if attachment.resolve_type() == "application/pdf":
+        if not base64_content:
+            base64_content = attachment.base64_content()
+        return {
+            "type": "input_file",
+            "filename": f"{attachment.id()}.pdf",
+            "file_data": f"data:application/pdf;base64,{base64_content}",
+        }
+    if attachment.resolve_type().startswith("image/"):
+        item = {"type": "input_image", "image_url": url}
+        if image_detail:
+            item["detail"] = image_detail
+        return item
+    # Audio is not yet supported on the Responses input shape we use; fall
+    # back to image_url for unknown types so we don't silently drop content.
+    return {"type": "input_image", "image_url": url}
+
+
+class _SharedResponses(_Shared):
+    """Mixin that translates llm.Prompt into Responses API parameters."""
+
+    def __str__(self) -> str:
+        return "OpenAI Responses: {}".format(self.model_id)
+
+    def _delegate_chat_kwargs(self):
+        """Return constructor kwargs that mirror this Responses model so we
+        can build a sibling Chat / AsyncChat instance for the
+        ``-o chat_completions 1`` opt-out path."""
+        return dict(
+            model_id=self.model_id,
+            key=self.key,
+            model_name=self.model_name,
+            api_base=self.api_base,
+            api_type=self.api_type,
+            api_version=self.api_version,
+            api_engine=self.api_engine,
+            headers=self.headers,
+            can_stream=self.can_stream,
+            vision=self.vision,
+            reasoning=self._reasoning,
+            verbosity=self._verbosity,
+            image_detail_original=self._image_detail_original,
+            supports_schema=self.supports_schema,
+            supports_tools=self.supports_tools,
+            allows_system_prompt=self.allows_system_prompt,
+        )
+
+    def _build_responses_input(self, prompt, image_detail=None):
+        """Translate prompt.messages into a (input_items, instructions) tuple
+        for the Responses API.
+
+        The most recent system Message is hoisted into ``instructions``;
+        earlier system messages are dropped (mirroring the way the Chat
+        path collapses repeated identical system prompts).
+        """
+        from llm.parts import (
+            AttachmentPart,
+            ReasoningPart,
+            TextPart,
+            ToolCallPart,
+            ToolResultPart,
+        )
+
+        items: List[Dict[str, Any]] = []
+        instructions: Optional[str] = None
+
+        for msg in prompt.messages:
+            if msg.role == "system":
+                text = "".join(
+                    p.text for p in msg.parts if isinstance(p, TextPart)
+                )
+                if text:
+                    instructions = text
+                continue
+
+            text_bits: List[str] = []
+            attachment_items: List[Dict[str, Any]] = []
+            tool_call_items: List[Dict[str, Any]] = []
+            tool_result_items: List[Dict[str, Any]] = []
+            reasoning_items: List[Dict[str, Any]] = []
+
+            for part in msg.parts:
+                if isinstance(part, TextPart):
+                    text_bits.append(part.text)
+                elif isinstance(part, AttachmentPart) and part.attachment:
+                    attachment_items.append(
+                        _responses_attachment(
+                            part.attachment, image_detail=image_detail
+                        )
+                    )
+                elif isinstance(part, ToolCallPart):
+                    tool_call_items.append(
+                        {
+                            "type": "function_call",
+                            "call_id": part.tool_call_id,
+                            "name": part.name,
+                            "arguments": json.dumps(part.arguments),
+                        }
+                    )
+                elif isinstance(part, ToolResultPart):
+                    tool_result_items.append(
+                        {
+                            "type": "function_call_output",
+                            "call_id": part.tool_call_id,
+                            "output": part.output,
+                        }
+                    )
+                elif isinstance(part, ReasoningPart):
+                    pm = (part.provider_metadata or {}).get("openai") or {}
+                    enc = pm.get("encrypted_content")
+                    rid = pm.get("id")
+                    if enc or rid:
+                        # Round-trip a previous reasoning item so the model
+                        # can pick up where it left off mid-tool-call.
+                        item: Dict[str, Any] = {"type": "reasoning"}
+                        if rid:
+                            item["id"] = rid
+                        if enc:
+                            item["encrypted_content"] = enc
+                        if pm.get("summary"):
+                            item["summary"] = pm["summary"]
+                        else:
+                            item["summary"] = []
+                        reasoning_items.append(item)
+
+            # Reasoning items must precede the assistant message / function
+            # call they belonged to.
+            items.extend(reasoning_items)
+
+            if msg.role == "tool":
+                items.extend(tool_result_items)
+                continue
+
+            if msg.role == "user":
+                if attachment_items:
+                    content: List[Dict[str, Any]] = []
+                    if text_bits:
+                        content.append(
+                            {"type": "input_text", "text": "".join(text_bits)}
+                        )
+                    content.extend(attachment_items)
+                    items.append({"role": "user", "content": content})
+                elif text_bits:
+                    items.append({"role": "user", "content": "".join(text_bits)})
+            elif msg.role == "assistant":
+                if text_bits:
+                    items.append(
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "".join(text_bits),
+                                }
+                            ],
+                        }
+                    )
+                items.extend(tool_call_items)
+
+        return items, instructions
+
+    def _build_responses_kwargs(self, prompt, stream):
+        """Build the keyword arguments for client.responses.create()."""
+        opts = dict(not_nulls(prompt.options))
+        # Strip options that are either internal to llm or not accepted by
+        # the Responses API.
+        opts.pop("json_object", None)
+        opts.pop("chat_completions", None)
+        opts.pop("image_detail", None)
+        max_tokens = opts.pop("max_tokens", None)
+        reasoning_effort = opts.pop("reasoning_effort", None)
+        verbosity = opts.pop("verbosity", None)
+        temperature = opts.pop("temperature", None)
+        top_p = opts.pop("top_p", None)
+        seed = opts.pop("seed", None)
+
+        kwargs: Dict[str, Any] = {}
+        if max_tokens is None and self.default_max_tokens is not None:
+            max_tokens = self.default_max_tokens
+        if max_tokens is not None:
+            kwargs["max_output_tokens"] = max_tokens
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if seed is not None:
+            kwargs["seed"] = seed
+        if reasoning_effort:
+            kwargs["reasoning"] = {"effort": reasoning_effort}
+
+        text: Dict[str, Any] = {}
+        if verbosity:
+            text["verbosity"] = verbosity
+        if prompt.options.json_object:
+            text["format"] = {"type": "json_object"}
+        if prompt.schema:
+            # ``strict: False`` mirrors the looser behaviour of the
+            # /v1/chat/completions json_schema response_format - required
+            # because the Responses API otherwise insists on
+            # ``additionalProperties: false`` everywhere.
+            text["format"] = {
+                "type": "json_schema",
+                "name": "output",
+                "schema": prompt.schema,
+                "strict": False,
+            }
+        if text:
+            kwargs["text"] = text
+
+        if prompt.tools:
+            kwargs["tools"] = [
+                {
+                    "type": "function",
+                    "name": tool.name,
+                    "description": tool.description or None,
+                    "parameters": tool.input_schema,
+                }
+                for tool in prompt.tools
+            ]
+
+        # Pass anything we did not consume through verbatim - this lets
+        # extras like ``parallel_tool_calls`` flow into the API.
+        kwargs.update(opts)
+        return kwargs
+
+    def _set_usage_responses(self, response, usage):
+        if not usage:
+            return
+        input_tokens = usage.get("input_tokens", 0) or 0
+        output_tokens = usage.get("output_tokens", 0) or 0
+        details = {}
+        for key in ("input_tokens_details", "output_tokens_details"):
+            value = usage.get(key)
+            if value:
+                details[key] = value
+        response.set_usage(
+            input=input_tokens, output=output_tokens, details=details or None
+        )
+
+
+class Responses(_SharedResponses, KeyModel):
+    needs_key = "openai"
+    key_env_var = "OPENAI_API_KEY"
+    default_max_tokens = None
+
+    def __init__(
+        self,
+        model_id,
+        key=None,
+        model_name=None,
+        api_base=None,
+        api_type=None,
+        api_version=None,
+        api_engine=None,
+        headers=None,
+        can_stream=True,
+        vision=False,
+        audio=False,
+        reasoning=False,
+        verbosity=False,
+        image_detail_original=False,
+        supports_schema=False,
+        supports_tools=False,
+        allows_system_prompt=True,
+    ):
+        super().__init__(
+            model_id,
+            key=key,
+            model_name=model_name,
+            api_base=api_base,
+            api_type=api_type,
+            api_version=api_version,
+            api_engine=api_engine,
+            headers=headers,
+            can_stream=can_stream,
+            vision=vision,
+            audio=audio,
+            reasoning=reasoning,
+            verbosity=verbosity,
+            image_detail_original=image_detail_original,
+            supports_schema=supports_schema,
+            supports_tools=supports_tools,
+            allows_system_prompt=allows_system_prompt,
+        )
+        self._reasoning = reasoning
+        self._verbosity = verbosity
+        self._image_detail_original = image_detail_original
+        # Override the Options class so that ``-o chat_completions 1`` is
+        # always available on Responses-routed models.
+        self.Options = build_options_class(
+            reasoning=reasoning,
+            verbosity=verbosity,
+            image_detail_original=image_detail_original,
+            chat_completions=True,
+        )
+
+    def execute(
+        self,
+        prompt: Prompt,
+        stream: bool,
+        response: Response,
+        conversation: Optional[Conversation] = None,
+        key: Optional[str] = None,
+    ) -> Iterator[Union[str, StreamEvent]]:
+        if getattr(prompt.options, "chat_completions", None):
+            chat = Chat(**self._delegate_chat_kwargs())
+            yield from chat.execute(prompt, stream, response, conversation, key)
+            return
+
+        if prompt.system and not self.allows_system_prompt:
+            raise NotImplementedError("Model does not support system prompts")
+
+        image_detail = getattr(prompt.options, "image_detail", None)
+        if image_detail is not None:
+            image_detail = image_detail.value
+        input_items, instructions = self._build_responses_input(
+            prompt, image_detail=image_detail
+        )
+        kwargs = self._build_responses_kwargs(prompt, stream)
+        if instructions is not None:
+            kwargs["instructions"] = instructions
+        kwargs["store"] = False
+        kwargs["include"] = ["reasoning.encrypted_content"]
+
+        client = self.get_client(key)
+        usage = None
+        had_reasoning = False
+        if stream:
+            stream_obj = client.responses.create(
+                model=self.model_name or self.model_id,
+                input=input_items,
+                stream=True,
+                **kwargs,
+            )
+            tool_call_meta: Dict[str, Dict[str, str]] = {}
+            final_response_dict: Optional[Dict[str, Any]] = None
+            for event in stream_obj:
+                etype = getattr(event, "type", None)
+                if etype == "response.output_item.added":
+                    item = event.item
+                    if item.type == "function_call":
+                        tool_call_meta[item.id] = {
+                            "id": item.id,
+                            "call_id": item.call_id,
+                            "name": item.name,
+                        }
+                        yield StreamEvent(
+                            type="tool_call_name",
+                            chunk=item.name or "",
+                            tool_call_id=item.call_id,
+                        )
+                    elif item.type == "reasoning":
+                        had_reasoning = True
+                elif etype == "response.output_text.delta":
+                    yield StreamEvent(type="text", chunk=event.delta or "")
+                elif etype == "response.function_call_arguments.delta":
+                    item_id = getattr(event, "item_id", None)
+                    meta = tool_call_meta.get(item_id) if item_id else None
+                    call_id = meta["call_id"] if meta else None
+                    yield StreamEvent(
+                        type="tool_call_args",
+                        chunk=event.delta or "",
+                        tool_call_id=call_id,
+                    )
+                elif etype == "response.output_item.done":
+                    item = event.item
+                    if item.type == "function_call":
+                        try:
+                            args = (
+                                json.loads(item.arguments) if item.arguments else {}
+                            )
+                        except json.JSONDecodeError:
+                            args = {"_raw": item.arguments}
+                        response.add_tool_call(
+                            llm.ToolCall(
+                                tool_call_id=item.call_id,
+                                name=item.name,
+                                arguments=args,
+                            )
+                        )
+                elif etype == "response.completed":
+                    final_response_dict = event.response.model_dump()
+                    if final_response_dict.get("usage"):
+                        usage = final_response_dict["usage"]
+            if final_response_dict is not None:
+                response.response_json = remove_dict_none_values(
+                    final_response_dict
+                )
+        else:
+            completion = client.responses.create(
+                model=self.model_name or self.model_id,
+                input=input_items,
+                stream=False,
+                **kwargs,
+            )
+            dumped = completion.model_dump()
+            response.response_json = remove_dict_none_values(dumped)
+            usage = dumped.get("usage")
+            for item in completion.output:
+                if item.type == "reasoning":
+                    had_reasoning = True
+                elif item.type == "function_call":
+                    try:
+                        args = json.loads(item.arguments) if item.arguments else {}
+                    except json.JSONDecodeError:
+                        args = {"_raw": item.arguments}
+                    response.add_tool_call(
+                        llm.ToolCall(
+                            tool_call_id=item.call_id,
+                            name=item.name,
+                            arguments=args,
+                        )
+                    )
+                    yield StreamEvent(
+                        type="tool_call_name",
+                        chunk=item.name or "",
+                        tool_call_id=item.call_id,
+                    )
+                    yield StreamEvent(
+                        type="tool_call_args",
+                        chunk=item.arguments or "",
+                        tool_call_id=item.call_id,
+                    )
+                elif item.type == "message":
+                    for content in item.content or []:
+                        ctype = getattr(content, "type", None)
+                        if ctype == "output_text" and content.text:
+                            yield StreamEvent(type="text", chunk=content.text)
+
+        self._set_usage_responses(response, usage)
+        if had_reasoning or (
+            usage
+            and (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        ):
+            yield StreamEvent(type="reasoning", chunk="", redacted=True)
+        response._prompt_json = redact_data(
+            {"input": input_items, "instructions": instructions}
+        )
+
+
+class AsyncResponses(_SharedResponses, AsyncKeyModel):
+    needs_key = "openai"
+    key_env_var = "OPENAI_API_KEY"
+    default_max_tokens = None
+
+    def __init__(
+        self,
+        model_id,
+        key=None,
+        model_name=None,
+        api_base=None,
+        api_type=None,
+        api_version=None,
+        api_engine=None,
+        headers=None,
+        can_stream=True,
+        vision=False,
+        audio=False,
+        reasoning=False,
+        verbosity=False,
+        image_detail_original=False,
+        supports_schema=False,
+        supports_tools=False,
+        allows_system_prompt=True,
+    ):
+        super().__init__(
+            model_id,
+            key=key,
+            model_name=model_name,
+            api_base=api_base,
+            api_type=api_type,
+            api_version=api_version,
+            api_engine=api_engine,
+            headers=headers,
+            can_stream=can_stream,
+            vision=vision,
+            audio=audio,
+            reasoning=reasoning,
+            verbosity=verbosity,
+            image_detail_original=image_detail_original,
+            supports_schema=supports_schema,
+            supports_tools=supports_tools,
+            allows_system_prompt=allows_system_prompt,
+        )
+        self._reasoning = reasoning
+        self._verbosity = verbosity
+        self._image_detail_original = image_detail_original
+        self.Options = build_options_class(
+            reasoning=reasoning,
+            verbosity=verbosity,
+            image_detail_original=image_detail_original,
+            chat_completions=True,
+        )
+
+    async def execute(
+        self,
+        prompt: Prompt,
+        stream: bool,
+        response: AsyncResponse,
+        conversation: Optional[AsyncConversation] = None,
+        key: Optional[str] = None,
+    ) -> AsyncGenerator[Union[str, StreamEvent], None]:
+        if getattr(prompt.options, "chat_completions", None):
+            chat = AsyncChat(**self._delegate_chat_kwargs())
+            async for event in chat.execute(
+                prompt, stream, response, conversation, key
+            ):
+                yield event
+            return
+
+        if prompt.system and not self.allows_system_prompt:
+            raise NotImplementedError("Model does not support system prompts")
+
+        image_detail = getattr(prompt.options, "image_detail", None)
+        if image_detail is not None:
+            image_detail = image_detail.value
+        input_items, instructions = self._build_responses_input(
+            prompt, image_detail=image_detail
+        )
+        kwargs = self._build_responses_kwargs(prompt, stream)
+        if instructions is not None:
+            kwargs["instructions"] = instructions
+        kwargs["store"] = False
+        kwargs["include"] = ["reasoning.encrypted_content"]
+
+        client = self.get_client(key, async_=True)
+        usage = None
+        had_reasoning = False
+        if stream:
+            stream_obj = await client.responses.create(
+                model=self.model_name or self.model_id,
+                input=input_items,
+                stream=True,
+                **kwargs,
+            )
+            tool_call_meta: Dict[str, Dict[str, str]] = {}
+            final_response_dict: Optional[Dict[str, Any]] = None
+            async for event in stream_obj:
+                etype = getattr(event, "type", None)
+                if etype == "response.output_item.added":
+                    item = event.item
+                    if item.type == "function_call":
+                        tool_call_meta[item.id] = {
+                            "id": item.id,
+                            "call_id": item.call_id,
+                            "name": item.name,
+                        }
+                        yield StreamEvent(
+                            type="tool_call_name",
+                            chunk=item.name or "",
+                            tool_call_id=item.call_id,
+                        )
+                    elif item.type == "reasoning":
+                        had_reasoning = True
+                elif etype == "response.output_text.delta":
+                    yield StreamEvent(type="text", chunk=event.delta or "")
+                elif etype == "response.function_call_arguments.delta":
+                    item_id = getattr(event, "item_id", None)
+                    meta = tool_call_meta.get(item_id) if item_id else None
+                    call_id = meta["call_id"] if meta else None
+                    yield StreamEvent(
+                        type="tool_call_args",
+                        chunk=event.delta or "",
+                        tool_call_id=call_id,
+                    )
+                elif etype == "response.output_item.done":
+                    item = event.item
+                    if item.type == "function_call":
+                        try:
+                            args = (
+                                json.loads(item.arguments) if item.arguments else {}
+                            )
+                        except json.JSONDecodeError:
+                            args = {"_raw": item.arguments}
+                        response.add_tool_call(
+                            llm.ToolCall(
+                                tool_call_id=item.call_id,
+                                name=item.name,
+                                arguments=args,
+                            )
+                        )
+                elif etype == "response.completed":
+                    final_response_dict = event.response.model_dump()
+                    if final_response_dict.get("usage"):
+                        usage = final_response_dict["usage"]
+            if final_response_dict is not None:
+                response.response_json = remove_dict_none_values(
+                    final_response_dict
+                )
+        else:
+            completion = await client.responses.create(
+                model=self.model_name or self.model_id,
+                input=input_items,
+                stream=False,
+                **kwargs,
+            )
+            dumped = completion.model_dump()
+            response.response_json = remove_dict_none_values(dumped)
+            usage = dumped.get("usage")
+            for item in completion.output:
+                if item.type == "reasoning":
+                    had_reasoning = True
+                elif item.type == "function_call":
+                    try:
+                        args = json.loads(item.arguments) if item.arguments else {}
+                    except json.JSONDecodeError:
+                        args = {"_raw": item.arguments}
+                    response.add_tool_call(
+                        llm.ToolCall(
+                            tool_call_id=item.call_id,
+                            name=item.name,
+                            arguments=args,
+                        )
+                    )
+                    yield StreamEvent(
+                        type="tool_call_name",
+                        chunk=item.name or "",
+                        tool_call_id=item.call_id,
+                    )
+                    yield StreamEvent(
+                        type="tool_call_args",
+                        chunk=item.arguments or "",
+                        tool_call_id=item.call_id,
+                    )
+                elif item.type == "message":
+                    for content in item.content or []:
+                        ctype = getattr(content, "type", None)
+                        if ctype == "output_text" and content.text:
+                            yield StreamEvent(type="text", chunk=content.text)
+
+        self._set_usage_responses(response, usage)
+        if had_reasoning or (
+            usage
+            and (usage.get("output_tokens_details") or {}).get("reasoning_tokens")
+        ):
+            yield StreamEvent(type="reasoning", chunk="", redacted=True)
+        response._prompt_json = redact_data(
+            {"input": input_items, "instructions": instructions}
+        )
 
 
 class Completion(Chat):

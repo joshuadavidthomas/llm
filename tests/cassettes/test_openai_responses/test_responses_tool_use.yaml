@@ -1,0 +1,216 @@
+interactions:
+- request:
+    body: '{"include":["reasoning.encrypted_content"],"input":[{"role":"user","content":"What
+      is 1231 * 2331? Use the multiply tool."}],"model":"gpt-5.5","reasoning":{"effort":"low"},"store":false,"stream":false,"tools":[{"type":"function","name":"multiply","description":"Multiply
+      two numbers.","parameters":{"properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"],"type":"object"}}]}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '400'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 2.34.0
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - Linux
+      X-Stainless-Package-Version:
+      - 2.34.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.11.15
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/responses
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/5VVyW7bMBC9+ysMnu1Am2Mr5x6KJi2KopeiKQRKGjmMKZHl4sQw/O8dUtbmOAHq
+        g2HO4zzO8mZ8nM3nhJXkbk4UaJkF6RroJgUooEjW6SYIb9OKplUCQRUWm5CGaR7ROEiSchVBkAcB
+        WTgKkT9DYToa0Who7YUCaqDMqMPC9XoTxFFyG3lMG2qsdj6FqCUHvNc65bTYbZWwjYurolxDa2ac
+        s2aLtiMe0SDpAZTzL2EPXEg8IHBqH+4oL56OPQpKCefZWM69oVLw10JTHDIJDeXmgGBwE3iMNR1Z
+        VoKhjOuxJ2u0UbYwDJMe22v6mglrpDWZETt4CxoheFZQPqWrRQnc5bSVZrm6WS2jILpdBskyikl/
+        QVH33NitfQktv31p2gL1ra2KDxpbFmHiG7uOoiqENF7lMazWiX/Ok5iDBE9jG5+nj3qA3+ujB6na
+        2hoa4/HjI6GP5C6M4nDxSHL8GcVxeBpuO+Ksjdn/fL7/vHuovlTpge/yX/uH/P6H/PTtZzN4NLT2
+        sdWWGyb5gXjghN9/fGEkVUgEfFpu7FirKYlyxbbDlbYjtGfC6qxTdBtYX3KpMFuDlMUTZDs4vIsp
+        rEhzbhiJkqe2jzgYWjQTPUNVCeWHiIuXc4pE27qmqmPv9a1pBeaAITnqisFEzRrUnmFShnXzUVGs
+        DzmPnVAwGSwDtXSast4envM38GqG2DCymg7nkSr8vbbq55D3oHKhma8mqaFkth4Gs+3Dk8D4HEyt
+        EaQH9FsFX4pvaH0JulBMdpX9elbA3LwILEWdg9I3HwilR5xEauyR0qP02iZiWbCGU7sT9YVhFCZr
+        DGzbRdR9Touxb/5/vrMrLMQtK6ag7KvVx3XxVH/6M/Lunjvv7BFCy5K5clL+fZy7V8rsIgzUkWJ+
+        5bthupg6I2TGxRYrmDuCoDdKP2DppjUo7Gm3ykjJNM159x9gNd3CID/WTBbparN4ax9t5+OwUHAC
+        y8ExmAj1cj9H8TXgGm8/ve9RG2EoH8BN2A+A1dNhRenRkhqvqdPs9A/gX36dkgcAAA==
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      cf-ray:
+      - 9f745b477f340044-ORD
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Wed, 06 May 2026 01:54:23 GMT
+      openai-organization:
+      - user-r3e61fpak04cbaokp5buoae4
+      openai-processing-ms:
+      - '1084'
+      openai-project:
+      - proj_2Y4H7T2XPShczTQx5fqMXdNp
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      set-cookie:
+      - __cf_bm=z7uNE1DqeNcWOXy7RIEwbyUEWlzdoMxhY9qUkpfgq8E-1778032461.9979239-1.0.1.1-VqVdBmRJortunHk6vz6JIxYW1JMEnm17BsExYD9AGOJBsRDJIWU_K7O0Hnxp_tK6ziVKx4HG7qrTcXV07bZCPdoED.Rg_hKX.CjJv529BuAWX_aerfhFo8Xob0p8.Sfs;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 06 May 2026
+        02:24:23 GMT
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-ratelimit-limit-requests:
+      - '15000'
+      x-ratelimit-limit-tokens:
+      - '40000000'
+      x-ratelimit-remaining-requests:
+      - '14999'
+      x-ratelimit-remaining-tokens:
+      - '40000000'
+      x-ratelimit-reset-requests:
+      - 4ms
+      x-ratelimit-reset-tokens:
+      - 0s
+      x-request-id:
+      - req_879af2c359a94b25bca83aca9ef2e65f
+    status:
+      code: 200
+      message: OK
+- request:
+    body: '{"include":["reasoning.encrypted_content"],"input":[{"role":"user","content":"What
+      is 1231 * 2331? Use the multiply tool."},{"type":"function_call","call_id":"call_jKHkLfJf9ylkbYvLbKRpDNTn","name":"multiply","arguments":"{\"a\":
+      1231, \"b\": 2331}"},{"type":"function_call_output","call_id":"call_jKHkLfJf9ylkbYvLbKRpDNTn","output":"2869461"}],"model":"gpt-5.5","reasoning":{"effort":"low"},"store":false,"stream":false,"tools":[{"type":"function","name":"multiply","description":"Multiply
+      two numbers.","parameters":{"properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"required":["a","b"],"type":"object"}}]}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '619'
+      Content-Type:
+      - application/json
+      Host:
+      - api.openai.com
+      User-Agent:
+      - OpenAI/Python 2.34.0
+      X-Stainless-Arch:
+      - x64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - Linux
+      X-Stainless-Package-Version:
+      - 2.34.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.11.15
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://api.openai.com/v1/responses
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAA/5VVSY7bMBC8+xWGjoY90OZFAfKEALlPAoESWzYzFMlw8Ywx8N/TIq3NYx9yk7rI
+        Yi9V5OdiuYwYjb4tIw1GlXES76o8JYe6qYDmWZzsioYUTd7ku/xwSIqsSiAhCdD9NsuKLMujdUch
+        qz9Q255GCgMhXmsgFmhJOizZ7w9xlua7zGPGEutMt6eWreKA68KmitRvRy2d6PJqCDcQwoxzJo4Y
+        +8RfDChyAd3tp3AGLhX+IHANB/eUd0fnHgWtZbdTOM59oNHw14GoL6UCQbi9IBi/xB5joicrKVjC
+        uJnuZMJY7WrLsOhpvCUfpXRWOVta+QZfQSslL2vC53StpMC7mo7KbrYv200ap7tNnG/SLBoWaNId
+        N90WTsLIq29NaNAw2tYcn052G+d06ydbHHZF2iT5HpoiL2jhz/Ms9qLA84Ax5Agj8GyEHqylsCDG
+        pKaJzWj7NsGHHXb7BUQIaUnf2tffM5DLo9KyeoB4IuRN0ixZ/nJxTPfLNMPv78vVKl1jmet8l6xW
+        0bDpevsaeCJ1IsYn1zDUQ0mEeUd5DbCW3KPEGIZNwCoXPY/nQG1qHC3w+ZhRKUHLCm2CcoMHckPo
+        zKQzZe+k0g9xGDUW3SqLlPUJyje4PMU0dO0PQonS/BT0g4Y0Usx8BE0jte8Yl++3GiPj2pbonn3w
+        lSEN2Aum1FE3DGYuMqDPDIuyrPdlQxwPQ0WtSA0zQ1toVadl5+PJrf7b9G65YWYtGf8nqvHrQtdv
+        KZ9BV9Iw303UKmWuHS+EMIeTxPz84JyV0QCYr87pj2mc8OYeZ0/B1JqpvrM/sEKm+GVp3yW2oq1A
+        m5dxtSBt8M5t2Yh0EmlxRtpMygtDxLZgD+fxzg93gUmaDL12DBfgIOqZKar/27t4wBJ1lyTTQGeW
+        9nndHTX8TYw52j28FROEUMq6dhL+c1q7V8riLg3UkWb+qenMdOc6K1U5uRfiIai8wYpDCGicaX+F
+        RpQZUvH+7XH+ghvkx8TsAi/y9df45FUY1OMdSMeN8Uyo9+9CcngEPOId3PuM2uKFySfMSTo4wJm5
+        W1F7hBLrRXVdXP8BMqG3+wsIAAA=
+    headers:
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      cf-ray:
+      - 9f745b4f2f7d0044-ORD
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Wed, 06 May 2026 01:54:24 GMT
+      openai-organization:
+      - user-r3e61fpak04cbaokp5buoae4
+      openai-processing-ms:
+      - '1355'
+      openai-project:
+      - proj_2Y4H7T2XPShczTQx5fqMXdNp
+      openai-version:
+      - '2020-10-01'
+      server:
+      - cloudflare
+      set-cookie:
+      - __cf_bm=n0X3ttAhrLg1o4.WV.ZnmBJk2WZojTqaq1DsDoffi5w-1778032463.221904-1.0.1.1-vn34lp4AgkusR7VdGs7M8S_Gq2eOxBEbOdidg2ZEMx3iopML7ykmJupC_aAHReNHK8vo8.IXAw0zdXeZIhClirFAZoqB1sglnuvDE.x1LcjUY6Be2mdr7Aw67UkJG7Es;
+        HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Wed, 06 May 2026
+        02:24:24 GMT
+      strict-transport-security:
+      - max-age=31536000; includeSubDomains; preload
+      transfer-encoding:
+      - chunked
+      x-content-type-options:
+      - nosniff
+      x-ratelimit-limit-requests:
+      - '15000'
+      x-ratelimit-limit-tokens:
+      - '40000000'
+      x-ratelimit-remaining-requests:
+      - '14999'
+      x-ratelimit-remaining-tokens:
+      - '40000000'
+      x-ratelimit-reset-requests:
+      - 4ms
+      x-ratelimit-reset-tokens:
+      - 0s
+      x-request-id:
+      - req_552a72b066df401a8c127fdb2afe042f
+    status:
+      code: 200
+      message: OK
+version: 1
