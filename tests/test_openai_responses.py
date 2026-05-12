@@ -5,8 +5,62 @@ import os
 
 import llm
 import pytest
+from pytest_httpx import IteratorStream
 
 API_KEY = os.environ.get("PYTEST_OPENAI_API_KEY", None) or "badkey"
+
+
+def _responses_sse(event_type, data):
+    data = {"type": event_type, **data}
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n".encode("utf-8")
+
+
+def _responses_reasoning_summary_stream():
+    yield _responses_sse(
+        "response.reasoning_summary_text.delta",
+        {
+            "item_id": "rs_1",
+            "output_index": 0,
+            "summary_index": 0,
+            "delta": "Thinking",
+            "sequence_number": 1,
+        },
+    )
+    yield _responses_sse(
+        "response.reasoning_summary_text.delta",
+        {
+            "item_id": "rs_1",
+            "output_index": 0,
+            "summary_index": 0,
+            "delta": " aloud",
+            "sequence_number": 2,
+        },
+    )
+    yield _responses_sse(
+        "response.output_item.done",
+        {
+            "item": {
+                "id": "rs_1",
+                "type": "reasoning",
+                "summary": [{"type": "summary_text", "text": "Thinking aloud"}],
+                "encrypted_content": "encrypted",
+                "status": "completed",
+            },
+            "output_index": 0,
+            "sequence_number": 3,
+        },
+    )
+    yield _responses_sse(
+        "response.output_text.delta",
+        {
+            "item_id": "msg_1",
+            "output_index": 1,
+            "content_index": 0,
+            "delta": "done",
+            "logprobs": [],
+            "sequence_number": 4,
+        },
+    )
 
 
 def test_responses_model_is_registered():
@@ -83,6 +137,7 @@ def test_default_routes_to_responses_endpoint(httpx_mock):
     assert any("/v1/responses" in str(r.url) for r in requests)
     request_body = json.loads(requests[-1].content)
     assert request_body["include"] == ["reasoning.encrypted_content"]
+    assert request_body["reasoning"] == {"summary": "auto"}
 
 
 def test_non_reasoning_responses_model_omits_encrypted_reasoning_include(httpx_mock):
@@ -128,6 +183,7 @@ def test_non_reasoning_responses_model_omits_encrypted_reasoning_include(httpx_m
     request_body = json.loads(httpx_mock.get_requests()[-1].content)
     assert request_body["model"] == "gpt-4.1"
     assert "include" not in request_body
+    assert "reasoning" not in request_body
 
 
 def test_responses_input_translation():
@@ -190,8 +246,60 @@ def test_responses_kwargs_packs_reasoning_and_verbosity():
     p.tools = []
     p.schema = None
     kwargs = model._build_responses_kwargs(p, stream=False)
-    assert kwargs["reasoning"] == {"effort": "low"}
+    assert kwargs["reasoning"] == {"summary": "auto", "effort": "low"}
     assert kwargs["text"]["verbosity"] == "low"
+
+
+def test_responses_kwargs_sets_reasoning_summary_without_effort():
+    model = llm.get_model("gpt-5.5")
+    options = model.Options()
+
+    class FakePrompt:
+        pass
+
+    p = FakePrompt()
+    p.options = options
+    p.tools = []
+    p.schema = None
+    kwargs = model._build_responses_kwargs(p, stream=False)
+    assert kwargs["reasoning"] == {"summary": "auto"}
+
+
+def test_responses_streams_reasoning_summary_text(httpx_mock):
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.openai.com/v1/responses",
+        stream=IteratorStream(_responses_reasoning_summary_stream()),
+        headers={"Content-Type": "text/event-stream"},
+    )
+
+    model = llm.get_model("gpt-5.5")
+    response = model.prompt("hello", key="test")
+    events = list(response.stream_events())
+
+    assert [(e.type, e.chunk) for e in events] == [
+        ("reasoning", "Thinking"),
+        ("reasoning", " aloud"),
+        ("reasoning", ""),
+        ("text", "done"),
+    ]
+    messages = response.messages()
+    reasoning_parts = [
+        p for m in messages for p in m.parts if isinstance(p, llm.parts.ReasoningPart)
+    ]
+    assert reasoning_parts == [
+        llm.parts.ReasoningPart(
+            text="Thinking aloud",
+            provider_metadata={
+                "openai": {
+                    "id": "rs_1",
+                    "encrypted_content": "encrypted",
+                    "summary": [{"type": "summary_text", "text": "Thinking aloud"}],
+                }
+            },
+        )
+    ]
+    assert response.text() == "done"
 
 
 @pytest.mark.vcr

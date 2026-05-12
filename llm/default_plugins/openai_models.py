@@ -1358,8 +1358,11 @@ class _SharedResponses(_Shared):
             kwargs["top_p"] = top_p
         if seed is not None:
             kwargs["seed"] = seed
-        if reasoning_effort:
-            kwargs["reasoning"] = {"effort": reasoning_effort}
+        if self._reasoning:
+            reasoning = {"summary": "auto"}
+            if reasoning_effort:
+                reasoning["effort"] = reasoning_effort
+            kwargs["reasoning"] = reasoning
 
         text: Dict[str, Any] = {}
         if verbosity:
@@ -1410,7 +1413,19 @@ class _SharedResponses(_Shared):
             input=input_tokens, output=output_tokens, details=details or None
         )
 
-    def _reasoning_event(self, item):
+    def _reasoning_text_from_item(self, item):
+        bits = []
+        for attr in ("summary", "content"):
+            for part in getattr(item, attr, None) or []:
+                if isinstance(part, dict):
+                    text = part.get("text")
+                else:
+                    text = getattr(part, "text", None)
+                if text:
+                    bits.append(text)
+        return "".join(bits)
+
+    def _reasoning_event(self, item, *, include_text=True):
         """Build a redacted-reasoning StreamEvent that carries the opaque
         ``id`` and ``encrypted_content`` from a Responses-API reasoning
         item. Echoing this metadata back on the next request via
@@ -1420,6 +1435,7 @@ class _SharedResponses(_Shared):
         rid = getattr(item, "id", None)
         enc = getattr(item, "encrypted_content", None)
         summary = getattr(item, "summary", None)
+        text = self._reasoning_text_from_item(item) if include_text else ""
         meta: Dict[str, Any] = {}
         if rid:
             meta["id"] = rid
@@ -1437,8 +1453,8 @@ class _SharedResponses(_Shared):
                 meta["summary"] = list(summary)
         return StreamEvent(
             type="reasoning",
-            chunk="",
-            redacted=True,
+            chunk=text,
+            redacted=include_text and not text,
             provider_metadata={"openai": meta} if meta else None,
         )
 
@@ -1540,6 +1556,7 @@ class Responses(_SharedResponses, KeyModel):
             )
             tool_call_meta: Dict[str, Dict[str, str]] = {}
             final_response_dict: Optional[Dict[str, Any]] = None
+            reasoning_items_with_streamed_text = set()
             for event in stream_obj:
                 etype = getattr(event, "type", None)
                 if etype == "response.output_item.added":
@@ -1566,11 +1583,36 @@ class Responses(_SharedResponses, KeyModel):
                         chunk=event.delta or "",
                         tool_call_id=call_id,
                     )
+                elif etype in (
+                    "response.reasoning_summary_text.delta",
+                    "response.reasoning_text.delta",
+                ):
+                    item_id = getattr(event, "item_id", None)
+                    if item_id:
+                        reasoning_items_with_streamed_text.add(item_id)
+                    yield StreamEvent(type="reasoning", chunk=event.delta or "")
+                elif etype in (
+                    "response.reasoning_summary_text.done",
+                    "response.reasoning_text.done",
+                ):
+                    item_id = getattr(event, "item_id", None)
+                    if item_id not in reasoning_items_with_streamed_text:
+                        text = getattr(event, "text", None) or ""
+                        if text:
+                            if item_id:
+                                reasoning_items_with_streamed_text.add(item_id)
+                            yield StreamEvent(type="reasoning", chunk=text)
                 elif etype == "response.output_item.done":
                     item = event.item
                     if item.type == "reasoning":
                         had_reasoning = True
-                        yield self._reasoning_event(item)
+                        item_id = getattr(item, "id", None)
+                        yield self._reasoning_event(
+                            item,
+                            include_text=(
+                                item_id not in reasoning_items_with_streamed_text
+                            ),
+                        )
                     elif item.type == "function_call":
                         try:
                             args = json.loads(item.arguments) if item.arguments else {}
@@ -1744,6 +1786,7 @@ class AsyncResponses(_SharedResponses, AsyncKeyModel):
             )
             tool_call_meta: Dict[str, Dict[str, str]] = {}
             final_response_dict: Optional[Dict[str, Any]] = None
+            reasoning_items_with_streamed_text = set()
             async for event in stream_obj:
                 etype = getattr(event, "type", None)
                 if etype == "response.output_item.added":
@@ -1770,11 +1813,36 @@ class AsyncResponses(_SharedResponses, AsyncKeyModel):
                         chunk=event.delta or "",
                         tool_call_id=call_id,
                     )
+                elif etype in (
+                    "response.reasoning_summary_text.delta",
+                    "response.reasoning_text.delta",
+                ):
+                    item_id = getattr(event, "item_id", None)
+                    if item_id:
+                        reasoning_items_with_streamed_text.add(item_id)
+                    yield StreamEvent(type="reasoning", chunk=event.delta or "")
+                elif etype in (
+                    "response.reasoning_summary_text.done",
+                    "response.reasoning_text.done",
+                ):
+                    item_id = getattr(event, "item_id", None)
+                    if item_id not in reasoning_items_with_streamed_text:
+                        text = getattr(event, "text", None) or ""
+                        if text:
+                            if item_id:
+                                reasoning_items_with_streamed_text.add(item_id)
+                            yield StreamEvent(type="reasoning", chunk=text)
                 elif etype == "response.output_item.done":
                     item = event.item
                     if item.type == "reasoning":
                         had_reasoning = True
-                        yield self._reasoning_event(item)
+                        item_id = getattr(item, "id", None)
+                        yield self._reasoning_event(
+                            item,
+                            include_text=(
+                                item_id not in reasoning_items_with_streamed_text
+                            ),
+                        )
                     elif item.type == "function_call":
                         try:
                             args = json.loads(item.arguments) if item.arguments else {}
