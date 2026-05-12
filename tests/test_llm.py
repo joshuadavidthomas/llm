@@ -529,7 +529,7 @@ def test_prompt_options_shows_selected_model_options(user_path):
     assert result.exit_code == 0
     assert expected.exit_code == 0
     assert result.output == expected.output
-    assert "OpenAI Chat: gpt-5.5" in result.output
+    assert "OpenAI Responses: gpt-5.5" in result.output
     assert "  Options:" in result.output
     assert "    reasoning_effort: str" in result.output
     assert not (user_path / "logs.db").exists()
