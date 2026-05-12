@@ -489,9 +489,7 @@ def cli():
 @click.option("--no-stream", is_flag=True, help="Do not stream output")
 @click.option("-n", "--no-log", is_flag=True, help="Don't log to database")
 @click.option("--log", is_flag=True, help="Log prompt and response to the database")
-@click.option(
-    "-R", "--no-reasoning", is_flag=True, help="Don't display reasoning output"
-)
+@click.option("-R", "--hide-reasoning", is_flag=True, help="Hide reasoning output")
 @click.option(
     "_continue",
     "-c",
@@ -542,7 +540,7 @@ def prompt(
     no_stream,
     no_log,
     log,
-    no_reasoning,
+    hide_reasoning,
     _continue,
     conversation_id,
     key,
@@ -895,6 +893,9 @@ def prompt(
         # Merge in options for the .prompt() methods
         kwargs.update(validated_options)
 
+    if hide_reasoning:
+        kwargs["hide_reasoning"] = True
+
     try:
         if async_:
 
@@ -911,7 +912,7 @@ def prompt(
                     )
                     await display_async_stream_events(
                         response.astream_events(),
-                        show_reasoning=not no_reasoning,
+                        show_reasoning=not hide_reasoning,
                     )
                     print("")
                 else:
@@ -946,7 +947,7 @@ def prompt(
             if should_stream:
                 display_stream_events(
                     response.stream_events(),
-                    show_reasoning=not no_reasoning,
+                    show_reasoning=not hide_reasoning,
                 )
                 print("")
             else:
@@ -1044,9 +1045,7 @@ def prompt(
     help="Path to log database",
 )
 @click.option("--no-stream", is_flag=True, help="Do not stream output")
-@click.option(
-    "-R", "--no-reasoning", is_flag=True, help="Don't display reasoning output"
-)
+@click.option("-R", "--hide-reasoning", is_flag=True, help="Hide reasoning output")
 @click.option("--key", help="API key to use")
 @click.option(
     "tools",
@@ -1095,7 +1094,7 @@ def chat(
     param,
     options,
     no_stream,
-    no_reasoning,
+    hide_reasoning,
     key,
     database,
     tools,
@@ -1197,6 +1196,8 @@ def chat(
 
     if key and isinstance(model, KeyModel):
         kwargs["key"] = key
+    if hide_reasoning:
+        kwargs["hide_reasoning"] = True
 
     try:
         fragments_and_attachments = resolve_fragments(
@@ -1302,7 +1303,7 @@ def chat(
         argument_system_fragments = []
         display_stream_events(
             response.stream_events(),
-            show_reasoning=not no_reasoning,
+            show_reasoning=not hide_reasoning,
         )
         response.log_to_db(db)
         print("")
