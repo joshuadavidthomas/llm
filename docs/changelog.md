@@ -5,7 +5,7 @@
 
 ### Support for the OpenAI Responses API
 
-Most reasoning-capable OpenAI models now use the [`/v1/responses`](https://platform.openai.com/docs/api-reference/responses) endpoint instead of `/v1/chat/completions`. This enables interleaved reasoning across tool calls for GPT-5 class models. [#1435](https://github.com/simonw/llm/pull/1435)
+Most reasoning-capable OpenAI models now use the [`/v1/responses`](https://developers.openai.com/api/reference/responses/overview) endpoint instead of `/v1/chat/completions`. This enables interleaved reasoning across tool calls for GPT-5 class models. [#1435](https://github.com/simonw/llm/pull/1435)
 
 - New `Responses` and `AsyncResponses` model classes driving the OpenAI Responses API. The existing `Chat` and `AsyncChat` classes are unchanged so other plugins that import them keep working.
 - The following models now use the Responses API by default: `o1`, `o3-mini`, `o3`, `o4-mini`, `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5.1`, `gpt-5.2`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.5` (and their pinned date variants).
